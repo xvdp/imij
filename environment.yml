@@ -1,0 +1,12 @@
+name: imij
+channels:
+  - conda-forge
+dependencies:
+  - numpy<=1.26.4
+  - pip
+  - pip:
+    - opencolorio
+    - openimageio
+    - opencv-python<=4.11.0.86
+    - opencv-contrib-python<=4.11.0.86
+    - git+https://github.com/xvdp/imij.git
