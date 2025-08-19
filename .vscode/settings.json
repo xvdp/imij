@@ -1,0 +1,14 @@
+{
+    "python.testing.pytestArgs": [
+        "imij"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "workbench.colorCustomizations": {
+      "statusBar.background": "#3c5d6e",
+      "statusBar.foreground": "#022010",
+        "titleBar.inactiveBackground": "#4f7a8f",
+        "titleBar.activeBackground": "#3c5d6e",
+        "titleBar.foreground": "#022010",
+    },
+}

@@ -1,8 +1,10 @@
-import os
+""" light wrapper on openimageio for dpx file handling
+"""
 import os.path as osp
-from typing import Union, Optional
+from typing import Union
 from copy import deepcopy
 import numpy as np
+from scipy.interpolate import interp1d
 import OpenImageIO as oiio
 import PyOpenColorIO as ocio
 import cdl_convert.parse as cdl_parse
@@ -67,7 +69,10 @@ class DPX:
         lut = files[".cube"][0] if files[".cube"] else None
         return lut, ccc
 
-
+###
+#
+# functional methods
+#
 def opendpx_ccc(fname: str,
                 lut:Union[str, ocio.FileTransform, None] = None,
                 cdl:Union[str, ocio.CDLTransform, None] = None):
@@ -222,3 +227,49 @@ def image_proc_no_lut(cdl):
     # Create a processor that applies only the inverse CDL transformation
     proc = cfg.getProcessor('cdl', 'inv_cdl')  # source and destination are same if only applying inverse CDL
     return proc.getDefaultCPUProcessor()
+
+
+def invert_lut(lutfile, invertedlut):
+    """
+        invert_1d_lut("HND_filmlog_toBt1886.v6.cube", "HND_Bt1886_to_filmlog.cube")
+    """
+    with open(lutfile, 'r') as f:
+        lines = f.readlines()
+    
+    # Extract 1D LUT
+    data = []
+    for line in lines:
+        if line.strip() and not line.startswith(('TITLE', 'DOMAIN', 'LUT_1D_SIZE')):
+            data.append(list(map(float, line.split())))
+    data = np.array(data)
+    
+    # Original LUT: input (first column) → output (other columns)
+    original_input = data[:, 0]  # Input values (e.g., 0.0, 0.1, ..., 1.0)
+    original_output = data[:, 1:]  # Output RGB values
+    
+    # Create inverse LUT by swapping input/output
+    # Note: This assumes the original LUT is strictly monotonic!
+    inverse_output = original_input
+    inverse_input = original_output
+    
+    # Interpolate to ensure smoothness
+    inverse_lut = []
+    for channel in range(3):  # R, G, B
+        interp = interp1d(
+            inverse_input[:, channel], 
+            inverse_output, 
+            kind='linear', 
+            bounds_error=False, 
+            fill_value='extrapolate'
+        )
+        # Sample new LUT at original input intervals
+        new_output = interp(original_input)
+        inverse_lut.append(new_output)
+    
+    # Write inverted LUT
+    with open(invertedlut, 'w') as f:
+        f.write("TITLE Inverted_LUT\n")
+        f.write(f"LUT_1D_SIZE {len(original_input)}\n")
+        for i in range(len(original_input)):
+            f.write(f"{original_input[i]:.6f} {' '.join(f'{x:.6f}' for x in inverse_lut[i])}\n")
+
