@@ -7,8 +7,20 @@ import OpenImageIO as oiio
 import PyOpenColorIO as ocio
 import cdl_convert.parse as cdl_parse
 
+from .utils import find_files
 
 class DPX:
+    """
+    shortcut for mucking around with dpx files,  
+
+    example:
+        >>> D = DPX()
+        >>> image = D.open("dpxfile.dpx", applylut=True)
+        # if theres a lut recursively, from ../ it will apply the lut and the color correction
+        # otherwise
+        >>> D.make_processor(lut, ccc)
+        >>> D.open("dpxfile.dpx", applylut=True)
+    """
 
     def __init__(self):
         self.proc = None
@@ -23,20 +35,38 @@ class DPX:
             f"missing processor: > .make_processor(lut, ccc)"
         return dpxcpuproc(image)
 
-    def open(self, dpxfile: str, applylut=True):
+    def open(self, dpxfile: str, applylut: bool = True, **kwargs):
+        """ searches for ccc and cube in the neighborhood of dpx file if no processor present
+        """
+        assert osp.isfile(dpxfile), f"dpx file not found in path {dpxfile}"
+        lut = kwargs.pop('lut', None)
+        ccc = kwargs.pop('ccc', None)
+        assert lut is None or osp.isfile(lut), f" lut kwarg expects file got {type(lut)}" 
+        assert ccc is None or osp.isfile(ccc), f" ccc kwarg expects file got {type(ccc)}" 
+        if lut is not None or ccc is not None:
+            self.make_processor(lut, ccc)
+            applylut = True
+  
+        if applylut:
+            if self.proc is None:
+                lut, ccc = self._get_lut_ccc(dpxfile)
+                if ccc is None and lut is None:
+                    print("No ccc or lut files were found, opening raw")
+                else:
+                    print (f" applying lut {lut}, and ccc {ccc}")
+                self.make_processor(lut, ccc)
         processor = self.proc if applylut else None
         return opendpx(dpxfile, processor)
 
-    def get_ccc(self, path='../support_files'):
-        out = [f.path for f in os.scandir(path) if f.name.endswith(".ccc")]
-        if out:
-            out = out[0]
-        return out
-    def get_lut(self, path='../support_files/output_lut'):
-        out = [f.path for f in os.scandir(path) if f.name.endswith(".cube")]
-        if out:
-            out = out[0]
-        return out
+    @staticmethod
+    def _get_lut_ccc(path="."):
+        if osp.isfile(path):
+            path = osp.dirname(path)
+        files = find_files(osp.dirname(path), extensions=(".ccc", ".cube"))
+        ccc = files[".ccc"][0] if files[".ccc"] else None
+        lut = files[".cube"][0] if files[".cube"] else None
+        return lut, ccc
+
 
 def opendpx_ccc(fname: str,
                 lut:Union[str, ocio.FileTransform, None] = None,
@@ -148,8 +178,9 @@ def make_image_processor(lut:Union[str, ocio.FileTransform, None] = None,
         lut = readlut(lut)
     if (isinstance(cdl, str) and osp.isfile(cdl)) or cdl is None:
         cdl = cdl_from_ccc(cdl)
-    assert isinstance(lut, ocio.FileTransform)
-    assert isinstance(cdl, ocio.CDLTransform)
+    
+    assert isinstance(lut, ocio.FileTransform), f"lut {type(lut)}"
+    assert isinstance(cdl, ocio.CDLTransform), f"cdl {type(cdl)}"
     
     cfg = ocio.Config()
     film = ocio.ColorSpace(name='FilmLog')
