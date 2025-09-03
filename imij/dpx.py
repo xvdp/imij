@@ -102,7 +102,7 @@ def opendpx(fname, proccessor=None):
     pixels = buf.read_image(oiio.FLOAT)
     buf.close()
     if proccessor is not None:
-        print("applying proc")
+        # print("applying proc")
         pixels = dpxcpuproc(pixels, proccessor)
     return pixels
 

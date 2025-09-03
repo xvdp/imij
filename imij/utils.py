@@ -3,10 +3,13 @@ import sys
 import os
 import os.path as osp
 from pathlib import Path
+import numpy as np
+import re
 
 def find_files(path: Optional[str] = None,
                extensions: tuple = ('.ccc', '.cube'),
-               max_count: int  = 1):
+               max_count: int  = 1,
+               search_dirs = ('.', '..')):
     """
     Recursively searches for files with .ccc and .cube extensions
     in the current directory (.) and parent directory (..).
@@ -34,3 +37,27 @@ def find_files(path: Optional[str] = None,
                     return out
     return out
 
+
+def get_next_file_path(filename):
+    folder_path = osp.expanduser(osp.abspath(osp.dirname(filename)))
+    filename = osp.basename(filename)
+    os.makedirs(folder_path, exist_ok=True)
+    ext = "."+filename.split(".")[-1]
+    fname = filename[:-(len(ext))]
+    
+    # Get existing files to determine next index
+    existing_files = [f for f in os.listdir(folder_path)if f.startswith(fname) and f.endswith(ext)]
+    
+    # Extract numbers from existing filenames
+    indices = []
+    for _fname in existing_files:
+        match = re.search(rf"{fname}_(\d+)\{ext}", _fname)
+        if match:
+            indices.append(int(match.group(1)))
+    
+    # Determine next index
+    next_index = max(indices) + 1 if indices else 1
+    
+    # Create filename
+    filename = f"{fname}_{next_index:03d}{ext}"
+    return osp.join(folder_path, filename)
