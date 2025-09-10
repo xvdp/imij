@@ -9,26 +9,48 @@ import cv2
 
 from .utils import get_next_file_path
 
+def _img_range(x: np.ndarray, bits: Optional[int] = None):
+    """ return image range floats -> (0,1) or (x.min(), x.max())
+    bits force min max for uint bits, eg. bits=10, range-> 0, 2**10
+    """
+    if bits is not None: # ignore image and force, assume image is within that range
+        return 0, 2**bits - 1
+    _dtypes = (np.float32, np.float64, np.uint8, np.uint16)
+    assert x.dtype in _dtypes, f"Unhandled dtype {x.dtype}, expected {_dtypes}"
+    if x.dtype in (np.float32, np.float64):
+        out = min(x.min(), 0.0), max(x.max(), 1.0)
+    else:
+        out = (0, 2 ** (8 * x.dtype.itemsize) - 1)
+    return out
 
-def histdif(x : np.ndarray, y : np.ndarray) -> float:
-	""" compute histogram difference
-    assumes x in np.uint8
+def histdif(x : np.ndarray, y : np.ndarray, **kwargs) -> float:
+    """ compute histogram difference in HSV over HS channels
 
-	calcHist(images, -> in HSV
+    calcHist(images, -> in HSV
              channels, -> H, S
              mask - > None # could add face masks?
-             histSize - > [ 50, 60 ], H: 50, s: 60
-             ranges[, hist[, accumulate]]) -> [0, 180, 0, 256 ] H:[0-180], V[0-256]
-    compareHist( methods:  Correlation      COMP_CORREL
-                           Chi-Square       COMP_CHISQR 
-                           Intersection     CCOMP_INTERSECT
-                           Bhattacharyya    COMP_BHATTACHARYYA
+             histSize - > [ 50, 60 ], H: 50, sW: 60
+             ranges, hist[, accumulate]]) -> [0, 180, 0, 256 ] H:[0-180], V[0-256]
+    kwargs:
+        hrange  tuple, [0, sin(pi/4)*img_range]
+        vrange  tuple, [0, img_range]
+        hsize   int [50]    bins for hue range
+        vsize   int [60]    bins for value range
+        method   [cv2.HISTCMP_CORREL] | cv2.COMP_CHISQR | cv2.CCOMP_INTERSECT | cv2.COMP_BHATTACHARYYA
     https://docs.opencv.org/3.4/d8/dc8/tutorial_histogram_comparison.html
-	"""
-	hist_x = cv2.calcHist([cv2.cvtColor(x, cv2.COLOR_BGR2HSV)], [ 0, 1 ], None, [ 50, 60 ], [ 0, 180, 0, 256 ])
-	hist_y = cv2.calcHist([cv2.cvtColor(y, cv2.COLOR_BGR2HSV)], [ 0, 1 ], None, [ 50, 60 ], [ 0, 180, 0, 256 ])
-	return float(np.interp(cv2.compareHist(hist_x, hist_y, cv2.HISTCMP_CORREL),
-						   [ -1, 1 ], [ 0, 1 ]))
+    """
+    assert x.dtype == y.dtype, f"type mismatch, {x.dtype} != {y.dtype}"
+
+    _, xmax = _img_range(x)
+    hrange = kwargs.get('hrange', (0, (xmax*np.sin(np.pi/4).astype(x.dtype))))
+    vrange = kwargs.get('vrange', (0, xmax))
+    hsize =  kwargs.get('hsize', 50)
+    vsize =  kwargs.get('vsize', 60)
+    method = kwargs.get('method', cv2.HISTCMP_CORREL)
+    hists = [cv2.calcHist([cv2.cvtColor(z, cv2.COLOR_BGR2HSV)],
+                          [ 0, 1 ], None, [ hsize, vsize ], [ *hrange, *vrange ])
+             for z in (x, y)]
+    return float(np.interp(cv2.compareHist(hists[0], hists[1], method), [ -1, 1 ], [ 0, 1 ]))
 
 def map_np8_range(img, range=[0,256], b16=None):
     """ assumes float 32 is in range 0-1
@@ -162,8 +184,7 @@ def load_png(name,
             img = img[:,:,::-1]
     if dtype in ('f32', 'f64'):
         _dtype = {'f32':np.float32, 'f64':np.float32}[dtype]
-        denom = 2 ** (8 * img.dtype.itemsize) - 1
-        img = img.astype(_dtype) / denom
+        img = img.astype(_dtype) / _img_range(img)
     if dtype == 'uint16' and img.dtype == np.uint8:
         img = img.astype(np.uint16)*256
     return img
@@ -220,9 +241,30 @@ def expand_to_mult(img: Union[np.ndarray, str],
         shape[0] = hout
         shape[1] = wout
         img = expand_image(img, tuple(shape), color=color)
+        if out_name:
+            cv2.imwrite(out_name, img)
+    return img
 
-    if out_name:
-        cv2.imwrite(out_name, img)
+def crop_to_mult(img: Union[np.ndarray, str],
+                   mult: int,
+                   color: Union[int, float] = 0,
+                   out_name: Optional[str] = None) -> np.ndarray:
+    """  some models require images that are divisible by 8 for example
+    """
+    if isinstance(img, str):
+        out_name = img if out_name is None else out_name
+        img = load_png(img)
+    shape = list(img.shape)
+    h,w = shape[:2]
+    hout = math.floor(h/mult)*mult
+    wout = math.floor(w/mult)*mult
+    if hout != h or wout != w:
+        dh = (h - hout)
+        dw = (w - wout)
+        img = img[dh//2:-(dh - dh//2), dw//2:-(dw - dw//2)]
+
+        if out_name:
+            cv2.imwrite(out_name, img)
     return img
 
 def expand_black(img : np.ndarray, size: Union[tuple, np.ndarray]) -> np.ndarray:
